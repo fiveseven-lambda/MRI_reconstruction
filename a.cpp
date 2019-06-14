@@ -1,145 +1,114 @@
 #include <iostream>
-#include <fstream>
 #include <complex>
 #include <array>
-#include <cmath>
-#include <cfloat>
-#include <cstring>
-#include <unistd.h>
-#include <fcntl.h>
+#include <random>
 
-template<int N>
-class Block{
-	char data[N];
-	int cursor = 0;
-public:
-	constexpr uint32_t size(){return N;};
-	Block &operator<<(const char *);
-	template<class T>
-	Block &operator<<(T);
-	int write(int);
+using Real = double;
+using Complex = std::complex<Real>;
+
+template<int M, int N>
+constexpr Complex zeta(){
+	return Complex(cos(2 * M_PI * N / M), sin(2 * M_PI * N / M));
+}
+
+template<int N, int SIGN, int I = 0>
+struct array_mulzeta{
+	static void mulzeta(Complex x[]){
+		*x *= zeta<N * 2, SIGN * I>();
+		array_mulzeta<N, SIGN, I + 1>::mulzeta(x + 1);
+	}
+};
+template<int N, int SIGN>
+struct array_mulzeta<N, SIGN, N>{
+	static void mulzeta(Complex []){}
+};
+template<int SIZE, int I = 0>
+struct array{
+	static void add(Complex a[], Complex b[], Complex c[]){
+		*c = *a + *b;
+		array<SIZE, I + 1>::add(a + 1, b + 1, c + 1);
+	}
+	static void subst(Complex a[], Complex b[], Complex c[]){
+		*c = *a - *b;
+		array<SIZE, I + 1>::subst(a + 1, b + 1, c + 1);
+	}
+	static void div(Complex x[]){
+		*x /= SIZE;
+		array<SIZE, I + 1>::div(x + 1);
+	}
+};
+template<int SIZE>
+struct array<SIZE, SIZE>{
+	static void add(Complex [], Complex [], Complex []){}
+	static void subst(Complex [], Complex [], Complex []){}
+	static void div(Complex []){};
 };
 
-
-template<int N>
-Block<N> &Block<N>::operator<<(const char *a){
-	int i;
-	for(i = 0; a[i]; ++i) data[cursor + i] = a[i];
-	cursor += i;
-	return *this;
-}
-
-template<int N>
-template<class T>
-Block<N> &Block<N>::operator<<(T a){
-	memcpy(data + cursor, &a, sizeof a);
-	cursor += sizeof a;
-	return *this;
-}
-
-template<int N>
-int Block<N>::write(int fd){
-	::write(fd, data, N);
-	return N;
-}
-
-using num = std::complex<double>;
-
-#define ARC(i, a, b) for(int i = (a); i < (b); ++i)
-#define RC(i, n) ARC(i, 0, n)
-
-template<int N, int S>
-std::array<num, N> FFT(const std::array<num, N> &x){
-	std::array<num, N / 2> half[2];
-	for(int i = 0; i < N; ++i) half[i & 1][i >> 1] = x[i];
-
-	half[0] = FFT<N / 2, S>(half[0]);
-	half[1] = FFT<N / 2, S>(half[1]);
-
-	num z = 1;
-	constexpr num a(cos(2 * M_PI * S / N), sin(2 * M_PI * S / N));
-	for(auto &i : half[1]){
-		i *= z;
-		z *= a;
+template<int SIZE, int SIGN, int GAP = 1>
+struct array_FFT{
+	static void FFT(Complex x[], Complex X[]){
+		Complex even[SIZE / 2], odd[SIZE / 2];
+		array_FFT<SIZE / 2, SIGN, GAP * 2>::FFT(x, even);
+		array_FFT<SIZE / 2, SIGN, GAP * 2>::FFT(x + GAP, odd);
+		array_mulzeta<SIZE / 2, SIGN>::mulzeta(odd);
+		array<SIZE / 2>::add(even, odd, X);
+		array<SIZE / 2>::subst(even, odd, X + SIZE / 2);
 	}
-	
-	std::array<num, N> ret;
-	for(int i = 0; i < N / 2; ++i){
-		ret[i] = half[0][i] + half[1][i];
-		ret[i + N / 2] = half[0][i] - half[1][i];
+};
+template<int SIGN, int GAP>
+struct array_FFT<1, SIGN, GAP>{
+	static void FFT(Complex x[], Complex X[]){
+		*X = *x;
 	}
-
-	return ret;
-}
-
-template<>
-std::array<num, 1> FFT<1, 1>(const std::array<num, 1> &x){
-	return x;
-}
-
-template<>
-std::array<num, 1> FFT<1, -1>(const std::array<num, 1> &x){
-	return x;
-}
+};
 
 template<int N>
-std::array<num, N> DFT(const std::array<num, N> &x){
-	return FFT<N, +1>(x);
+void DFT(Complex x[], Complex X[]){
+	array_FFT<N, 1>::FFT(x, X);
 }
-
 template<int N>
-std::array<num, N> IDFT(const std::array<num, N> &x){
-	std::array<num, N> ret = FFT<N, -1>(x);
-	for(auto &i : ret) i /= N;
-	return ret;
+void IDFT(Complex X[], Complex x[]){
+	array_FFT<N, -1>::FFT(X, x);
+	array<N>::div(x);
 }
-
 
 int main(){
-	constexpr int size = 256;
-	std::array<std::array<num, size>, size> x;
-	static unsigned char bitmap_data[size * size * 3];
-	std::fstream real("2DFSE_real.csv"), imag("2DFSE_imag.csv");
-	for(auto &i : x) for(auto &j : i){
-		double tmp;
-		real >> tmp;
-		j.real(tmp);
-		imag >> tmp;
-		j.imag(tmp);
-	}
-	for(int i = 0; i < size; ++i) x[i] = IDFT<size>(x[i]);
+	constexpr int size = 16;
+	Complex x[size], X[size];
+
+	// substitute random complex numbers to x
+	std::random_device gen;
+	std::uniform_real_distribution<Real> rnd(-1., 1.);
 	for(int i = 0; i < size; ++i){
-		std::array<num, size> tmp;
-		for(int j = 0; j < size; ++j) tmp[j] = x[j][i];
-		tmp = IDFT<size>(tmp);
-		for(int j = 0; j < size; ++j) x[j][i] = tmp[j];
-	}
-	double max = DBL_MIN, min = DBL_MAX;
-	for(auto i : x){
-		for(auto j : i){
-			if(max < abs(j)) max = abs(j);
-			if(min > abs(j)) min = abs(j);
-		}
-	}
-	for(int i = 0; i < size; ++i){
-		for(int j = 0; j < size; ++j){
-			bitmap_data[(i * size + j) * 3] =
-			bitmap_data[(i * size + j) * 3 + 1] =
-			bitmap_data[(i * size + j) * 3 + 2] = abs(x[i][(j + size / 2) % size]) / max * 256;
-		}
+		x[i].real(rnd(gen));
+		x[i].imag(rnd(gen));
 	}
 
-	uint32_t width = 256, height = 256;
-	Block<14> bitmapfileheader;
-	Block<40> bitmapinfoheader;
-	int fd = creat("out.bmp", S_IWUSR | S_IRUSR);
-	bitmapfileheader << "BM";
-	bitmapfileheader << bitmapfileheader.size() + bitmapinfoheader.size() + width * height * 3;
-	bitmapfileheader << uint16_t(0) << uint16_t(0);
-	bitmapfileheader << bitmapfileheader.size() + bitmapinfoheader.size();
-	bitmapinfoheader << bitmapinfoheader.size() << width << height << uint16_t(1) << uint16_t(24) << uint32_t(0) << width * height * 3 << uint32_t(0) << uint32_t(0) << uint32_t(0) << uint32_t(0);
+	// copy x to X
+	for(int i = 0; i < size; ++i) X[i] = x[i];
 
-	bitmapfileheader.write(fd);
-	bitmapinfoheader.write(fd);
-	write(fd, bitmap_data, width * height * 3);
+
+	// DFT ( FFT, time complexity : O(size * log(size)) )
+	DFT<size>(X, X);
+
+	for(int i = 0; i < size; ++i){
+
+		// calculate DFT by definition ( time complexity: O(size * size) )
+		Complex tmp = 0;
+		for(int j = 0; j < size; ++j) tmp += x[j] * Complex(cos(2 * M_PI * i * j / size), sin(2 * M_PI * i * j / size));
+
+		// check the answer
+		std::cout << X[i] << '=' << tmp << std::endl;
+	}
+
+	std::cout << std::endl;
+
+	// IDFT ( FFT )
+	IDFT<size>(X, X);
+
+	for(int i = 0; i < size; ++i){
+
+		// check the answer (IDFT is the inverse transform of DFT, so X = IDFT(DFT(x)) should be equal to x)
+		std::cout << X[i] << '=' << x[i] << std::endl;
+	}
 }
