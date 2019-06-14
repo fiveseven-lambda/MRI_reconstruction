@@ -1,10 +1,49 @@
 #include <iostream>
+#include <fstream>
 #include <complex>
 #include <array>
 #include <cmath>
+#include <cfloat>
+#include <cstring>
+#include <unistd.h>
+#include <fcntl.h>
+
+template<int N>
+class Block{
+	char data[N];
+	int cursor = 0;
+public:
+	constexpr uint32_t size(){return N;};
+	Block &operator<<(const char *);
+	template<class T>
+	Block &operator<<(T);
+	int write(int);
+};
+
+
+template<int N>
+Block<N> &Block<N>::operator<<(const char *a){
+	int i;
+	for(i = 0; a[i]; ++i) data[cursor + i] = a[i];
+	cursor += i;
+	return *this;
+}
+
+template<int N>
+template<class T>
+Block<N> &Block<N>::operator<<(T a){
+	memcpy(data + cursor, &a, sizeof a);
+	cursor += sizeof a;
+	return *this;
+}
+
+template<int N>
+int Block<N>::write(int fd){
+	::write(fd, data, N);
+	return N;
+}
 
 using num = std::complex<double>;
-constexpr int size = 256;
 
 #define ARC(i, a, b) for(int i = (a); i < (b); ++i)
 #define RC(i, n) ARC(i, 0, n)
@@ -57,13 +96,50 @@ std::array<num, N> IDFT(const std::array<num, N> &x){
 
 
 int main(){
-	std::array<num, size> x, X;
-	for(auto &i : x){
-		double a, b;
-		std::cin >> a >> b;
-		i.real(a);
-		i.imag(b);
+	constexpr int size = 256;
+	std::array<std::array<num, size>, size> x;
+	static unsigned char bitmap_data[size * size * 3];
+	std::fstream real("2DFSE_real.csv"), imag("2DFSE_imag.csv");
+	for(auto &i : x) for(auto &j : i){
+		double tmp;
+		real >> tmp;
+		j.real(tmp);
+		imag >> tmp;
+		j.imag(tmp);
 	}
-	X = DFT<size>(x);
-	std::array<num, size> x_ = IDFT<size>(X);
+	for(int i = 0; i < size; ++i) x[i] = IDFT<size>(x[i]);
+	for(int i = 0; i < size; ++i){
+		std::array<num, size> tmp;
+		for(int j = 0; j < size; ++j) tmp[j] = x[j][i];
+		tmp = IDFT<size>(tmp);
+		for(int j = 0; j < size; ++j) x[j][i] = tmp[j];
+	}
+	double max = DBL_MIN, min = DBL_MAX;
+	for(auto i : x){
+		for(auto j : i){
+			if(max < abs(j)) max = abs(j);
+			if(min > abs(j)) min = abs(j);
+		}
+	}
+	for(int i = 0; i < size; ++i){
+		for(int j = 0; j < size; ++j){
+			bitmap_data[(i * size + j) * 3] =
+			bitmap_data[(i * size + j) * 3 + 1] =
+			bitmap_data[(i * size + j) * 3 + 2] = abs(x[i][(j + size / 2) % size]) / max * 256;
+		}
+	}
+
+	uint32_t width = 256, height = 256;
+	Block<14> bitmapfileheader;
+	Block<40> bitmapinfoheader;
+	int fd = creat("out.bmp", S_IWUSR | S_IRUSR);
+	bitmapfileheader << "BM";
+	bitmapfileheader << bitmapfileheader.size() + bitmapinfoheader.size() + width * height * 3;
+	bitmapfileheader << uint16_t(0) << uint16_t(0);
+	bitmapfileheader << bitmapfileheader.size() + bitmapinfoheader.size();
+	bitmapinfoheader << bitmapinfoheader.size() << width << height << uint16_t(1) << uint16_t(24) << uint32_t(0) << width * height * 3 << uint32_t(0) << uint32_t(0) << uint32_t(0) << uint32_t(0);
+
+	bitmapfileheader.write(fd);
+	bitmapinfoheader.write(fd);
+	write(fd, bitmap_data, width * height * 3);
 }
