@@ -46,7 +46,7 @@ struct array<SIZE, SIZE>{
 
 template<int SIZE, int SIGN, int GAP = 1>
 struct array_FFT{
-	static void FFT(Complex x[], Complex X[]){
+	static void FFT(const Complex x[], Complex X[]){
 		Complex even[SIZE / 2], odd[SIZE / 2];
 		array_FFT<SIZE / 2, SIGN, GAP * 2>::FFT(x, even);
 		array_FFT<SIZE / 2, SIGN, GAP * 2>::FFT(x + GAP, odd);
@@ -57,17 +57,17 @@ struct array_FFT{
 };
 template<int SIGN, int GAP>
 struct array_FFT<1, SIGN, GAP>{
-	static void FFT(Complex x[], Complex X[]){
+	static void FFT(const Complex x[], Complex X[]){
 		*X = *x;
 	}
 };
 
 template<int N>
-void DFT(Complex x[], Complex X[]){
+void DFT(const Complex (&x)[N], Complex X[]){
 	array_FFT<N, 1>::FFT(x, X);
 }
 template<int N>
-void IDFT(Complex X[], Complex x[]){
+void IDFT(const Complex (&X)[N], Complex x[]){
 	array_FFT<N, -1>::FFT(X, x);
 	array<N>::div(x);
 }
@@ -89,7 +89,7 @@ int main(){
 
 
 	// DFT ( FFT, time complexity : O(size * log(size)) )
-	DFT<size>(X, X);
+	DFT(X, X);
 
 	for(int i = 0; i < size; ++i){
 
@@ -104,7 +104,7 @@ int main(){
 	std::cout << std::endl;
 
 	// IDFT ( FFT )
-	IDFT<size>(X, X);
+	IDFT(X, X);
 
 	for(int i = 0; i < size; ++i){
 
